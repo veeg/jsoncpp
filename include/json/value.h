@@ -12,7 +12,7 @@
 #include <string>
 #include <vector>
 #include <exception>
-
+#include <deque>
 #ifndef JSON_USE_CPPTL_SMALLMAP
 #include <map>
 #else
@@ -23,7 +23,7 @@
 #endif
 
 //Conditional NORETURN attribute on the throw functions would:
-// a) suppress false positives from static code analysis 
+// a) suppress false positives from static code analysis
 // b) possibly improve optimization opportunities.
 #if !defined(JSONCPP_NORETURN)
 #  if defined(_MSC_VER)
@@ -62,7 +62,7 @@ protected:
 /** Exceptions which the user cannot easily avoid.
  *
  * E.g. out-of-memory (when we use malloc), stack-overflow, malicious input
- * 
+ *
  * \remark derived from Json::Exception
  */
 class JSON_API RuntimeError : public Exception {
@@ -73,7 +73,7 @@ public:
 /** Exceptions thrown by JSON_ASSERT/JSON_FAIL macros.
  *
  * These are precondition-violations (user bugs) and internal errors (our bugs).
- * 
+ *
  * \remark derived from Json::Exception
  */
 class JSON_API LogicError : public Exception {
@@ -174,10 +174,14 @@ private:
  */
 class JSON_API Value {
   friend class ValueIteratorBase;
+  friend class OrderedValueIteratorBase;
 public:
   typedef std::vector<JSONCPP_STRING> Members;
+  typedef std::deque<std::pair<JSONCPP_STRING, Value*>> OrderedMembers;
   typedef ValueIterator iterator;
   typedef ValueConstIterator const_iterator;
+  typedef OrderedValueIterator ordered_iterator;
+  typedef OrderedValueConstIterator const_ordered_iterator;
   typedef Json::UInt UInt;
   typedef Json::Int Int;
 #if defined(JSON_HAS_INT64)
@@ -545,6 +549,7 @@ Json::Value obj_value(Json::objectValue); // {}
   /// \pre type() is objectValue or nullValue
   /// \post if type() was nullValue, it remains nullValue
   Members getMemberNames() const;
+  Members getMemberNamesOrdered() const;
 
   //# ifdef JSON_USE_CPPTL
   //      EnumMemberNames enumMemberNames() const;
@@ -566,6 +571,12 @@ Json::Value obj_value(Json::objectValue); // {}
 
   const_iterator begin() const;
   const_iterator end() const;
+
+  ordered_iterator beginOrdered();
+  const_ordered_iterator beginOrdered() const;
+
+  ordered_iterator endOrdered ();
+  const_ordered_iterator endOrdered() const;
 
   iterator begin();
   iterator end();
@@ -601,7 +612,10 @@ private:
   //   }
   //};
 
+    OrderedMembers *order;
+
   union ValueHolder {
+
     LargestInt int_;
     LargestUInt uint_;
     double real_;
@@ -682,6 +696,72 @@ private:
 
   Args args_;
 };
+
+/** \brief base class for Ordered Value iterators.
+ *
+ */
+class JSON_API OrderedValueIteratorBase {
+public:
+  typedef std::bidirectional_iterator_tag iterator_category;
+  typedef unsigned int size_t;
+  typedef int difference_type;
+  typedef OrderedValueIteratorBase SelfType;
+
+  bool operator==(const SelfType& other) const { return isEqual(other); }
+
+  bool operator!=(const SelfType& other) const { return !isEqual(other); }
+
+  difference_type operator-(const SelfType& other) const {
+    return other.computeDistance(*this);
+  }
+
+  /// Return either the index or the member name of the referenced value as a
+  /// Value.
+  Value key() const;
+
+  /// Return the index of the referenced Value, or -1 if it is not an arrayValue.
+  UInt index() const;
+
+  /// Return the member name of the referenced Value, or "" if it is not an
+  /// objectValue.
+  /// \note Avoid `c_str()` on result, as embedded zeroes are possible.
+  JSONCPP_STRING name() const;
+
+  /// Return the member name of the referenced Value. "" if it is not an
+  /// objectValue.
+  /// \deprecated This cannot be used for UTF-8 strings, since there can be embedded nulls.
+  JSONCPP_DEPRECATED("Use `key = name();` instead.")
+  char const* memberName() const;
+  /// Return the member name of the referenced Value, or NULL if it is not an
+  /// objectValue.
+  /// \note Better version than memberName(). Allows embedded nulls.
+  char const* memberName(char const** end) const;
+
+protected:
+  Value& deref() const;
+
+  void increment();
+
+  void decrement();
+
+  difference_type computeDistance(const SelfType& other) const;
+
+  bool isEqual(const SelfType& other) const;
+
+  void copy(const SelfType& other);
+
+private:
+  Value::OrderedMembers::iterator current_;
+  // Indicates that iterator is for a null value.
+  bool isNull_;
+
+public:
+  // For some reason, BORLAND needs these at the end, rather
+  // than earlier. No idea why.
+  OrderedValueIteratorBase();
+  explicit OrderedValueIteratorBase(const Value::OrderedMembers::iterator& current);
+};
+
 
 /** \brief base class for Value iterators.
  *
@@ -849,6 +929,109 @@ public:
 
   pointer operator->() const { return &deref(); }
 };
+
+/** \brief Insertion order Iterator for object and array value.
+ */
+class JSON_API OrderedValueIterator : public OrderedValueIteratorBase {
+  friend class Value;
+
+public:
+  typedef Value value_type;
+  typedef unsigned int size_t;
+  typedef int difference_type;
+  typedef Value& reference;
+  typedef Value* pointer;
+  typedef OrderedValueIterator SelfType;
+
+  OrderedValueIterator();
+  OrderedValueIterator(const OrderedValueIterator& other);
+
+private:
+/*! \internal Use by Value to create an iterator.
+ */
+  explicit OrderedValueIterator(const Value::OrderedMembers::iterator& current);
+public:
+  SelfType& operator=(const SelfType& other);
+
+  SelfType operator++(int) {
+    SelfType temp(*this);
+    ++*this;
+    return temp;
+  }
+
+  SelfType operator--(int) {
+    SelfType temp(*this);
+    --*this;
+    return temp;
+  }
+
+  SelfType& operator--() {
+    decrement();
+    return *this;
+  }
+
+  SelfType& operator++() {
+    increment();
+    return *this;
+  }
+
+  reference operator*() const { return deref(); }
+
+  pointer operator->() const { return &deref(); }
+};
+
+/** \brief const iterator for object and array value.
+ *
+ */
+class JSON_API OrderedValueConstIterator : public OrderedValueIteratorBase {
+  friend class Value;
+
+public:
+  typedef const Value value_type;
+  //typedef unsigned int size_t;
+  //typedef int difference_type;
+  typedef const Value& reference;
+  typedef const Value* pointer;
+  typedef OrderedValueConstIterator SelfType;
+
+  OrderedValueConstIterator();
+  OrderedValueConstIterator(OrderedValueIterator const& other);
+
+private:
+/*! \internal Use by Value to create an iterator.
+ */
+  explicit OrderedValueConstIterator(const Value::OrderedMembers::iterator& current);
+public:
+  SelfType& operator=(const OrderedValueIteratorBase& other);
+
+  SelfType operator++(int) {
+    SelfType temp(*this);
+    ++*this;
+    return temp;
+  }
+
+  SelfType operator--(int) {
+    SelfType temp(*this);
+    --*this;
+    return temp;
+  }
+
+  SelfType& operator--() {
+    decrement();
+    return *this;
+  }
+
+  SelfType& operator++() {
+    increment();
+    return *this;
+  }
+
+  reference operator*() const { return deref(); }
+
+  pointer operator->() const { return &deref(); }
+};
+
+
 
 } // namespace Json
 

@@ -29,6 +29,8 @@ class Path;
 class PathArgument;
 class Value;
 class ValueIteratorBase;
+class OrderedValueIterator;
+class OrderedValueConstIterator;
 class ValueIterator;
 class ValueConstIterator;
 

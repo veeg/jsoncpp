@@ -344,6 +344,7 @@ bool Value::CZString::isStaticString() const { return storage_.policy_ == noDupl
  */
 Value::Value(ValueType vtype) {
   initBasic(vtype);
+
   switch (vtype) {
   case nullValue:
     break;
@@ -359,7 +360,8 @@ Value::Value(ValueType vtype) {
     break;
   case arrayValue:
   case objectValue:
-    value_.map_ = new ObjectValues();
+    value_.map_ = new ObjectValues(); 
+    order = new OrderedMembers ();
     break;
   case booleanValue:
     value_.bool_ = false;
@@ -456,6 +458,7 @@ Value::Value(Value const& other)
     break;
   case arrayValue:
   case objectValue:
+    order = new OrderedMembers (*other.order);
     value_.map_ = new ObjectValues(*other.value_.map_);
     break;
   default:
@@ -481,7 +484,7 @@ Value::Value(Value&& other) {
 #endif
 
 Value::~Value() {
-  switch (type_) {
+ switch (type_) {
   case nullValue:
   case intValue:
   case uintValue:
@@ -494,6 +497,7 @@ Value::~Value() {
     break;
   case arrayValue:
   case objectValue:
+    delete order;
     delete value_.map_;
     break;
   default:
@@ -516,6 +520,7 @@ void Value::swapPayload(Value& other) {
   type_ = other.type_;
   other.type_ = temp;
   std::swap(value_, other.value_);
+  std::swap (order, other.order);
   int temp2 = allocated_;
   allocated_ = other.allocated_;
   other.allocated_ = temp2 & 0x1;
@@ -1042,6 +1047,7 @@ Value& Value::resolveReference(const char* key) {
   ObjectValues::value_type defaultValue(actualKey, nullSingleton());
   it = value_.map_->insert(it, defaultValue);
   Value& value = (*it).second;
+  order->push_back (std::make_pair(actualKey.data(), &value));
   return value;
 }
 
@@ -1062,6 +1068,7 @@ Value& Value::resolveReference(char const* key, char const* cend)
   ObjectValues::value_type defaultValue(actualKey, nullSingleton());
   it = value_.map_->insert(it, defaultValue);
   Value& value = (*it).second;
+  order->push_back (std::make_pair(actualKey.data(), &value));
   return value;
 }
 
@@ -1147,7 +1154,18 @@ bool Value::removeMember(const char* key, const char* cend, Value* removed)
   if (it == value_.map_->end())
     return false;
   *removed = it->second;
+
   value_.map_->erase(it);
+  auto it2 = order->begin();
+  for (; it2 != order->end (); it2++)
+  {
+    if (strcmp (it2->first.c_str(), key)  == 0)
+        break;
+  }
+
+  order->erase (it2);
+
+
   return true;
 }
 bool Value::removeMember(const char* key, Value* removed)
@@ -1240,6 +1258,24 @@ Value::Members Value::getMemberNames() const {
   }
   return members;
 }
+
+Value::Members Value::getMemberNamesOrdered() const {
+  JSON_ASSERT_MESSAGE(
+      type_ == nullValue || type_ == objectValue,
+      "in Json::Value::getMemberNames(), value must be objectValue");
+  if (type_ == nullValue)
+    return Value::Members();
+  Members members;
+  members.reserve(value_.map_->size());
+  OrderedMembers::const_iterator it = order->begin();
+  OrderedMembers::const_iterator itEnd = order->end();
+  for (; it != itEnd; ++it) {
+    members.push_back(JSONCPP_STRING((*it).first.data(),
+                                  (*it).first.length()));
+  }
+  return members;
+}
+
 //
 //# ifdef JSON_USE_CPPTL
 // EnumMemberNames
@@ -1443,6 +1479,30 @@ Value::iterator Value::begin() {
   return iterator();
 }
 
+Value::const_ordered_iterator Value::beginOrdered() const {
+  switch (type_) {
+  case arrayValue:
+  case objectValue:
+      return const_ordered_iterator(order->begin());
+    break;
+  default:
+    break;
+  }
+  return const_ordered_iterator();
+}
+
+Value::ordered_iterator Value::beginOrdered() {
+  switch (type_) {
+  case arrayValue:
+  case objectValue:
+      return ordered_iterator(order->begin());
+    break;
+  default:
+    break;
+  }
+  return ordered_iterator();
+}
+
 Value::iterator Value::end() {
   switch (type_) {
   case arrayValue:
@@ -1454,6 +1514,30 @@ Value::iterator Value::end() {
     break;
   }
   return iterator();
+}
+
+Value::ordered_iterator Value::endOrdered() {
+  switch (type_) {
+  case arrayValue:
+  case objectValue:
+      return ordered_iterator(order->end());
+    break;
+  default:
+    break;
+  }
+  return ordered_iterator();
+}
+
+Value::const_ordered_iterator Value::endOrdered() const {
+  switch (type_) {
+  case arrayValue:
+  case objectValue:
+      return const_ordered_iterator(order->end());
+    break;
+  default:
+    break;
+  }
+  return const_ordered_iterator();
 }
 
 // class PathArgument
