@@ -218,9 +218,11 @@ public: // overridden from Writer
    * \return String containing the JSON document that represents the root value.
    */
   JSONCPP_STRING write(const Value& root) JSONCPP_OVERRIDE;
+  JSONCPP_STRING writeOrdered(const Value& root);
 
 private:
   void writeValue(const Value& value);
+  void writeValueOrdered(const Value& value);
   void writeArrayValue(const Value& value);
   bool isMultineArray(const Value& value);
   void pushValue(const JSONCPP_STRING& value);

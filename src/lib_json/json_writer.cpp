@@ -396,6 +396,17 @@ void FastWriter::writeValue(const Value& value) {
 StyledWriter::StyledWriter()
     : rightMargin_(74), indentSize_(3), addChildValues_() {}
 
+JSONCPP_STRING StyledWriter::writeOrdered(const Value& root) {
+  document_ = "";
+  addChildValues_ = false;
+  indentString_ = "";
+  writeCommentBeforeValue(root);
+  writeValueOrdered(root);
+  writeCommentAfterValueOnSameLine(root);
+  document_ += "\n";
+  return document_;
+}
+
 JSONCPP_STRING StyledWriter::write(const Value& root) {
   document_ = "";
   addChildValues_ = false;
@@ -406,6 +417,67 @@ JSONCPP_STRING StyledWriter::write(const Value& root) {
   document_ += "\n";
   return document_;
 }
+
+void StyledWriter::writeValueOrdered(const Value& value) {
+  switch (value.type()) {
+  case nullValue:
+    pushValue("null");
+    break;
+  case intValue:
+    pushValue(valueToString(value.asLargestInt()));
+    break;
+  case uintValue:
+    pushValue(valueToString(value.asLargestUInt()));
+    break;
+  case realValue:
+    pushValue(valueToString(value.asDouble()));
+    break;
+  case stringValue:
+  {
+    // Is NULL possible for value.string_?
+    char const* str;
+    char const* end;
+    bool ok = value.getString(&str, &end);
+    if (ok) pushValue(valueToQuotedStringN(str, static_cast<unsigned>(end-str)));
+    else pushValue("");
+    break;
+  }
+  case booleanValue:
+    pushValue(valueToString(value.asBool()));
+    break;
+  case arrayValue:
+    writeArrayValue(value);
+    break;
+  case objectValue: {
+    Value::Members members(value.getMemberNamesOrdered());
+    if (members.empty ())
+      pushValue("{}");
+    else {
+      writeWithIndent("{");
+      indent();
+      Value::Members::iterator it = members.begin();
+      for (;;) {
+        const JSONCPP_STRING& name = *it;
+        const Value& childValue = value[name];
+        writeCommentBeforeValue(childValue);
+        writeWithIndent(valueToQuotedString(name.c_str()));
+        document_ += " : ";
+        writeValue(childValue);
+        if (++it == members.end()) {
+          writeCommentAfterValueOnSameLine(childValue);
+          break;
+        }
+        document_ += ',';
+        writeCommentAfterValueOnSameLine(childValue);
+      }
+      unindent();
+      writeWithIndent("}");
+    }
+  } break;
+  }
+}
+
+
 
 void StyledWriter::writeValue(const Value& value) {
   switch (value.type()) {
